@@ -1,33 +1,31 @@
 import sounddevice as sd
-import noisereduce as nr
 import numpy as np
+from scipy.fft import rfft, irfft, rfftfreq
 
-# Configuration
-fs = 44100                # Sampling frequency
-duration = 1              # Duration of audio chunks (seconds)
+fs = 44100
+chunk_size = 1024
 
-# Load or record noise profile
-print("🎙️ Recording ambient noise for profile...")
-noise_sample = sd.rec(int(5 * fs), samplerate=fs, channels=1, dtype='float32')
-sd.wait()
-noise_sample = noise_sample.flatten()
-print("✅ Noise profile ready!")
+print("🔁 Gitarg: Real-time Phase Flip (Frequency-Domain) Started. Ctrl+C to stop")
 
-print("🔊 Starting real-time noise reduction. Press Ctrl+C to stop.")
+def flip_phase_all_freq(audio_chunk):
+    # Flatten and FFT
+    y = audio_chunk.flatten()
+    Y = rfft(y)
+    Y_flipped = -Y  # Flip phase of all frequencies
+    y_out = irfft(Y_flipped)
+    return y_out.reshape((-1, 1))
+
+def callback(indata, outdata, frames, time, status):
+    if status:
+        print("⚠️", status)
+
+    # Apply frequency-domain phase flip
+    flipped = flip_phase_all_freq(indata)
+    outdata[:] = flipped
+
 try:
-    while True:
-        # Record audio chunk
-        audio_chunk = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float32')
-        sd.wait()
-        audio_chunk = audio_chunk.flatten()
-
-        # Noise reduction
-        reduced_noise_audio = nr.reduce_noise(y=audio_chunk, y_noise=noise_sample, sr=fs, prop_decrease=0.88)
-
-        # Playback noise-reduced audio
-        sd.play(reduced_noise_audio, fs)
-        sd.wait()
-
+    with sd.Stream(channels=1, samplerate=fs, blocksize=chunk_size, callback=callback):
+        while True:
+            sd.sleep(100)
 except KeyboardInterrupt:
-    print("\n⏹️ Real-time noise reduction stopped.")
-
+    print("\n⏹️ Gitarg stream stopped.")
