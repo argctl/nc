@@ -4,22 +4,42 @@ from scipy.signal import chirp
 from scipy.fft import rfft, rfftfreq
 import hashlib
 import time
+import tkinter as tk
+from threading import Thread
 
 fs = 44100
 chunk_size = 1024
-print("📡 Gitarg Hash Chirper Activated. Ctrl+C to stop.")
+print("📡 Gitarg Hash Chirper with UI Activated. Ctrl+C to stop.")
 
 hash_history = []
 prev_magnitudes = None
 last_chirp_time = 0
-chirp_debounce = 1
+chirp_debounce = 3
 
+# UI code
+def launch_ui():
+    def update_debounce(val):
+        global chirp_debounce
+        chirp_debounce = float(val)
+
+    root = tk.Tk()
+    root.title("Gitarg Chirp Control")
+
+    tk.Label(root, text="Chirp Debounce (seconds)").pack()
+    debounce_slider = tk.Scale(root, from_=0.1, to=10.0, resolution=0.1,
+                               orient=tk.HORIZONTAL, command=update_debounce)
+    debounce_slider.set(chirp_debounce)
+    debounce_slider.pack()
+
+    root.mainloop()
+
+ui_thread = Thread(target=launch_ui, daemon=True)
+ui_thread.start()
 
 def generate_chirp(f0=3000, f1=1000):
     chirp_t = np.arange(chunk_size) / fs
     chirp_tone = 0.1 * chirp(chirp_t, f0=f0, f1=f1, t1=chirp_t[-1], method='linear')
     return chirp_tone.astype(np.float32)
-
 
 def callback(indata, outdata, frames, time_info, status):
     global prev_magnitudes, last_chirp_time
@@ -52,7 +72,6 @@ def callback(indata, outdata, frames, time_info, status):
         prev_magnitudes = np.abs(Y)
 
     outdata[:, 0] = chirp_signal[:frames]
-
 
 try:
     with sd.Stream(channels=1, samplerate=fs, blocksize=chunk_size, callback=callback):
