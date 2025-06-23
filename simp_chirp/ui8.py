@@ -22,6 +22,8 @@ last_baseline_chirp = 0
 baseline_interval = 3.0
 baseline_enabled = True
 baseline_length = chunk_size
+constant_enabled = True
+last_constant_chirp = 0
 
 # Configurable trail length (number of frames of past data to keep)
 max_trail = 10
@@ -50,6 +52,11 @@ def launch_ui():
         global baseline_enabled
         baseline_enabled = not baseline_enabled
         toggle_button.config(text=f"Baseline: {'On' if baseline_enabled else 'Off'}")
+
+    def toggle_constant():
+        global constant_enabled
+        constant_enabled = not constant_enabled
+        toggle_constant_button.config(text=f"Constant: {'On' if constant_enabled else 'Off'}")
 
     def update_plot():
         while True:
@@ -91,6 +98,9 @@ def launch_ui():
     baseline_length_slider.set(baseline_length)
     baseline_length_slider.pack()
 
+    toggle_constant_button = tk.Button(root, text="Constant: On", command=toggle_constant)
+    toggle_constant_button.pack()
+
     fig, ax = plt.subplots(figsize=(7, 3))
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.get_tk_widget().pack()
@@ -114,8 +124,15 @@ def generate_baseline_chirp(length):
     chirp = 0.05 * np.sin(2 * np.pi * 5000 * t)
     return np.pad(chirp, (0, chunk_size - len(chirp)), 'constant').astype(np.float32)
 
+def generate_constant_chirp():
+    t = np.arange(chunk_size) / fs
+    f1, f2 = 300, 8000
+    chirp = 0.05 * np.sin(2 * np.pi * f1 * t) + 0.05 * np.sin(2 * np.pi * f2 * t)
+    return chirp.astype(np.float32)
+
 def callback(indata, outdata, frames, time_info, status):
-    global prev_magnitudes, last_chirp_time, last_chirp_visual, waveform_data, waveform_trail, last_baseline_chirp
+    global prev_magnitudes, last_chirp_time, last_chirp_visual, waveform_data, waveform_trail
+    global last_baseline_chirp, last_constant_chirp
 
     input_audio = indata[:, 0] if indata is not None else np.zeros(frames)
     hash_digest = hashlib.sha256(input_audio.tobytes()).hexdigest()
@@ -128,7 +145,12 @@ def callback(indata, outdata, frames, time_info, status):
     chirp_signal = np.zeros(frames, dtype=np.float32)
     now = time.time()
 
-    if baseline_enabled and (now - last_baseline_chirp) > baseline_interval:
+    if constant_enabled and (now - last_constant_chirp) > chirp_debounce:
+        chirp_signal = generate_constant_chirp()
+        last_constant_chirp = now
+        last_chirp_visual = now
+
+    elif baseline_enabled and (now - last_baseline_chirp) > baseline_interval:
         chirp_signal = generate_baseline_chirp(baseline_length)
         last_baseline_chirp = now
         last_chirp_visual = now
