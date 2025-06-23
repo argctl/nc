@@ -2,7 +2,7 @@ import sounddevice as sd
 import numpy as np
 
 fs = 44100  # Sample rate
-chunk_duration = 0.1  # seconds, shorter duration reduces latency
+chunk_duration = 0.2  # seconds, shorter duration reduces latency
 gain = 1.0  # Volume gain for cancellation (adjust as needed)
 
 print("🎙️ Real-time Active Noise Cancellation started. Press Ctrl+C to stop.")
