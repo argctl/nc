@@ -18,6 +18,8 @@ last_chirp_time = 0
 chirp_debounce = 3
 chirp_visual_boost_duration = 1.0
 last_chirp_visual = 0
+last_baseline_chirp = 0
+baseline_interval = 3.0
 
 # Configurable trail length (number of frames of past data to keep)
 max_trail = 10
@@ -84,8 +86,12 @@ def generate_derivative_chirp(signal):
     chirp_signal = 0.1 * derivative / np.max(np.abs(derivative) + 1e-6)
     return chirp_signal.astype(np.float32)
 
+def generate_baseline_chirp():
+    t = np.arange(chunk_size) / fs
+    return (0.05 * np.sin(2 * np.pi * 5000 * t)).astype(np.float32)
+
 def callback(indata, outdata, frames, time_info, status):
-    global prev_magnitudes, last_chirp_time, last_chirp_visual, waveform_data, waveform_trail
+    global prev_magnitudes, last_chirp_time, last_chirp_visual, waveform_data, waveform_trail, last_baseline_chirp
 
     input_audio = indata[:, 0] if indata is not None else np.zeros(frames)
     hash_digest = hashlib.sha256(input_audio.tobytes()).hexdigest()
@@ -98,7 +104,12 @@ def callback(indata, outdata, frames, time_info, status):
     chirp_signal = np.zeros(frames, dtype=np.float32)
     now = time.time()
 
-    if hash_matched and (now - last_chirp_time) > chirp_debounce:
+    if (now - last_baseline_chirp) > baseline_interval:
+        chirp_signal = generate_baseline_chirp()
+        last_baseline_chirp = now
+        last_chirp_visual = now
+
+    elif hash_matched and (now - last_chirp_time) > chirp_debounce:
         chirp_signal = generate_derivative_chirp(input_audio)
         last_chirp_time = now
         last_chirp_visual = now
