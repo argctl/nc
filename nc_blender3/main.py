@@ -7,9 +7,8 @@ import time
 
 fs = 44100
 chunk_size = 1024
-high_freq_cutoff = 3000
 
-print("📡 Gitarg Ambient Blender Activated. Ctrl+C to stop.")
+print("📡 Gitarg Ambient Blender with High-Freq Frame Noise Filtering Activated. Ctrl+C to stop.")
 
 # Oscillating tone parameters
 blend_duration_range = (3, 7)
@@ -32,12 +31,32 @@ mod_step_time = 0.01
 sweep_cycle_start = time.time()
 sweep_duration = np.random.uniform(*blend_duration_range)
 
+# Track high-frequency bins over frames
+high_freq_cutoff = 3000
+freq_bin_history = deque(maxlen=1)  # Only track current frame
+
+# FFT cancellation with high-frequency filtering
+def cancel_all_but_filter_high(audio):
+    Y = rfft(audio)
+    freqs = rfftfreq(len(audio), 1/fs)
+
+    # Identify high-frequency bins
+    high_bins = set(np.where(freqs > high_freq_cutoff)[0])
+    freq_bin_history.append(high_bins)
+
+    # Zero out any high frequency present in this frame
+    cancel_bins = set.intersection(*freq_bin_history) if freq_bin_history else set()
+    for i in cancel_bins:
+        Y[i] = 0
+
+    return irfft(-Y).astype(np.float32)
+
 def generate_tone(freq, duration_sec):
     samples = np.arange(int(fs * duration_sec)) / fs
     tone = volume * np.sin(2 * np.pi * freq * samples)
     return tone.astype(np.float32)
 
-def callback(outdata, frames, time_info, status):
+def callback(indata, outdata, frames, time_info, status):
     global current_freq, direction, sweep_cycle_start, sweep_duration
 
     now = time.time()
@@ -46,15 +65,20 @@ def callback(outdata, frames, time_info, status):
     if elapsed >= sweep_duration:
         sweep_cycle_start = now
         sweep_duration = np.random.uniform(*blend_duration_range)
-        direction *= -1  # Reverse sweep
-        current_freq += np.random.choice([-1, 1]) * sweep_step  # Drift
+        direction *= -1
+        current_freq += np.random.choice([-1, 1]) * sweep_step
         current_freq = np.clip(current_freq, *freq_range)
 
     tone = volume * np.sin(2 * np.pi * current_freq * np.arange(frames) / fs).astype(np.float32)
-    outdata[:] = tone.reshape(-1, 1)
+
+    input_audio = indata[:, 0] if indata is not None else np.zeros(frames)
+    cancellation = cancel_all_but_filter_high(input_audio)
+
+    mix = tone + cancellation[:frames]
+    outdata[:, 0] = mix
 
 try:
-    with sd.OutputStream(channels=1, samplerate=fs, blocksize=chunk_size, callback=callback):
+    with sd.Stream(channels=1, samplerate=fs, blocksize=chunk_size, callback=callback):
         while True:
             sd.sleep(100)
 except KeyboardInterrupt:

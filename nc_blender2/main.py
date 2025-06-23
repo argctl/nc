@@ -7,9 +7,8 @@ import time
 
 fs = 44100
 chunk_size = 1024
-high_freq_cutoff = 3000
 
-print("📡 Gitarg Ambient Blender Activated. Ctrl+C to stop.")
+print("📡 Gitarg Ambient Blender with Full-Freq Noise Cancellation Activated. Ctrl+C to stop.")
 
 # Oscillating tone parameters
 blend_duration_range = (3, 7)
@@ -32,13 +31,21 @@ mod_step_time = 0.01
 sweep_cycle_start = time.time()
 sweep_duration = np.random.uniform(*blend_duration_range)
 
+# Buffer to keep last chunk for cancellation
+last_input = np.zeros((chunk_size,), dtype=np.float32)
+
 def generate_tone(freq, duration_sec):
     samples = np.arange(int(fs * duration_sec)) / fs
     tone = volume * np.sin(2 * np.pi * freq * samples)
     return tone.astype(np.float32)
 
-def callback(outdata, frames, time_info, status):
-    global current_freq, direction, sweep_cycle_start, sweep_duration
+def cancel_all_frequencies(audio):
+    Y = rfft(audio)
+    Y_canceled = -Y  # Invert all frequencies
+    return irfft(Y_canceled).astype(np.float32)
+
+def callback(indata, outdata, frames, time_info, status):
+    global current_freq, direction, sweep_cycle_start, sweep_duration, last_input
 
     now = time.time()
     elapsed = now - sweep_cycle_start
@@ -50,11 +57,19 @@ def callback(outdata, frames, time_info, status):
         current_freq += np.random.choice([-1, 1]) * sweep_step  # Drift
         current_freq = np.clip(current_freq, *freq_range)
 
+    # Generate ambient blend tone
     tone = volume * np.sin(2 * np.pi * current_freq * np.arange(frames) / fs).astype(np.float32)
-    outdata[:] = tone.reshape(-1, 1)
+
+    # Full-frequency noise cancellation
+    input_audio = indata[:, 0] if indata is not None else np.zeros(frames)
+    cancellation = cancel_all_frequencies(input_audio)
+
+    # Mix tone and cancellation
+    mix = tone + cancellation[:frames]
+    outdata[:, 0] = mix
 
 try:
-    with sd.OutputStream(channels=1, samplerate=fs, blocksize=chunk_size, callback=callback):
+    with sd.Stream(channels=1, samplerate=fs, blocksize=chunk_size, callback=callback):
         while True:
             sd.sleep(100)
 except KeyboardInterrupt:
